@@ -70,8 +70,16 @@ def page_count(wiki):
     return len([f for f in d.glob("*.md") if f.name not in SKIP and f.name != "index.md"])
 
 def resolve_wikilink(slug, wiki):
-    """Convert [[slug]] to a browsable URL."""
+    """Convert [[slug]] to a browsable URL. Searches subdirs if flat slug not found."""
     slug = slug.strip().lower().replace(" ", "-").removesuffix(".md")
+    if "/" in slug:
+        return f"/{wiki}/{slug}"
+    flat = KNOWLEDGE_ROOT / wiki / f"{slug}.md"
+    if flat.exists():
+        return f"/{wiki}/{slug}"
+    for candidate in (KNOWLEDGE_ROOT / wiki).rglob(f"{slug}.md"):
+        rel = str(candidate.relative_to(KNOWLEDGE_ROOT / wiki)).removesuffix(".md").replace("\\", "/")
+        return f"/{wiki}/{rel}"
     return f"/{wiki}/{slug}"
 
 def render_md(text, wiki=None):
@@ -145,21 +153,29 @@ def wiki_list(wiki: str):
     return {"wiki": wiki, "count": len(pages), "pages": pages,
             "raw_base": f"http://192.168.1.59:3010/{wiki}"}
 
-@app.get("/{wiki}/{page}", response_class=HTMLResponse)
-def wiki_page(wiki: str, page: str):
+@app.get("/{wiki}/{path:path}/raw", response_class=PlainTextResponse)
+def wiki_page_raw(wiki: str, path: str):
     if wiki not in WIKIS: raise HTTPException(404)
-    label, _, color = WIKI_LABELS[wiki]
-    f = KNOWLEDGE_ROOT / wiki / f"{page}.md"
-    if not f.exists(): raise HTTPException(404, f"'{page}' not found in {wiki}")
-    text = f.read_text(encoding="utf-8")
-    html = render_md(text, wiki=wiki)
-    title = page.replace("-", " ").title()
-    body = f'<div class="md">{html}</div>'
-    return html_page(title, body, [("Home","/"), (label, f"/{wiki}"), (title, None)], raw_url=f"/{wiki}/{page}/raw")
-
-@app.get("/{wiki}/{page}/raw", response_class=PlainTextResponse)
-def wiki_page_raw(wiki: str, page: str):
-    if wiki not in WIKIS: raise HTTPException(404)
-    f = KNOWLEDGE_ROOT / wiki / f"{page}.md"
+    # strip trailing /raw if present
+    path = path.removesuffix("/raw")
+    f = KNOWLEDGE_ROOT / wiki / f"{path}.md"
     if not f.exists(): raise HTTPException(404)
     return f.read_text(encoding="utf-8")
+
+@app.get("/{wiki}/{path:path}", response_class=HTMLResponse)
+def wiki_page(wiki: str, path: str):
+    if wiki not in WIKIS: raise HTTPException(404)
+    label, _, color = WIKI_LABELS[wiki]
+    f = KNOWLEDGE_ROOT / wiki / f"{path}.md"
+    if not f.exists(): raise HTTPException(404, f"'{path}' not found in {wiki}")
+    text = f.read_text(encoding="utf-8")
+    html = render_md(text, wiki=wiki)
+    title = Path(path).name.replace("-", " ").title()
+    # Build breadcrumb: Home > wiki > subdir (if any) > page
+    crumbs = [("Home", "/"), (label, f"/{wiki}")]
+    parts = path.split("/")
+    if len(parts) > 1:
+        crumbs.append((parts[-2].replace("-"," ").title(), None))
+    crumbs.append((title, None))
+    body = f'<div class="md">{html}</div>'
+    return html_page(title, body, crumbs, raw_url=f"/{wiki}/{path}/raw")
