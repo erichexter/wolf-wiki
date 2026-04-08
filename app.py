@@ -71,7 +71,7 @@ def page_count(wiki):
 
 def resolve_wikilink(slug, wiki):
     """Convert [[slug]] to a browsable URL."""
-    slug = slug.strip().lower().replace(" ", "-")
+    slug = slug.strip().lower().replace(" ", "-").removesuffix(".md")
     return f"/{wiki}/{slug}"
 
 def render_md(text, wiki=None):
